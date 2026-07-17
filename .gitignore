@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.aws-sam/
+.coverage
+.pytest_cache/
+.venv/
+.env
+.env.*
+Output/
+logs/

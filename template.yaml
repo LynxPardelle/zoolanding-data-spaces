@@ -1,0 +1,302 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Zoolanding generic per-draft data spaces
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues:
+      - test
+      - prod
+  ConfigRegistryTableName:
+    Type: String
+    MinLength: 3
+  ConfigPayloadsBucketName:
+    Type: String
+    MinLength: 3
+  AuthSessionTableName:
+    Type: String
+    MinLength: 3
+  AuthUserStateTableName:
+    Type: String
+    MinLength: 3
+  InternalSnapshotCallerRoleArn:
+    Type: String
+    AllowedPattern: ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 10
+    MemorySize: 256
+    Tracing: PassThrough
+    Tags:
+      Project: Zoolandingpage
+      Component: DataSpaces
+      ManagedBy: SAM
+      Environment:
+        Ref: EnvironmentName
+
+Resources:
+  DataSpacesApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName:
+        Ref: EnvironmentName
+      MethodSettings:
+        - HttpMethod: POST
+          ResourcePath: /~1features~1data-spaces~1public-read
+          ThrottlingRateLimit: 25
+          ThrottlingBurstLimit: 50
+      Tags:
+        Project: Zoolandingpage
+        Component: DataSpaces
+        ManagedBy: SAM
+        Environment:
+          Ref: EnvironmentName
+
+  DataSpacesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: Zoolandingpage
+        - Key: Component
+          Value: DataSpaces
+        - Key: ManagedBy
+          Value: SAM
+        - Key: Environment
+          Value:
+            Ref: EnvironmentName
+
+  ProtectedReadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.protected_read.lambda_handler
+      Description: Serves authenticated data-space read operations.
+      Environment:
+        Variables:
+          DATA_SPACES_TABLE_NAME:
+            Ref: DataSpacesTable
+          CONFIG_REGISTRY_TABLE_NAME:
+            Ref: ConfigRegistryTableName
+          CONFIG_PAYLOADS_BUCKET_NAME:
+            Ref: ConfigPayloadsBucketName
+          AUTH_SESSION_TABLE_NAME:
+            Ref: AuthSessionTableName
+          AUTH_USER_STATE_TABLE_NAME:
+            Ref: AuthUserStateTableName
+          ENVIRONMENT_NAME:
+            Ref: EnvironmentName
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource:
+                Fn::GetAtt:
+                  - DataSpacesTable
+                  - Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigRegistryTableName}
+                - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionTableName}
+                - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthUserStateTableName}
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigPayloadsBucketName}/sites/*/versions/*/*/server/data-spaces.json
+                - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigPayloadsBucketName}/sites/*/versions/*/*/server/auth-profile-registry.json
+      Events:
+        ProtectedRead:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DataSpacesApi
+            Path: /features/data-spaces/read
+            Method: POST
+
+  ProtectedActionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.protected_action.lambda_handler
+      Description: Applies authenticated data-space mutations.
+      Environment:
+        Variables:
+          DATA_SPACES_TABLE_NAME:
+            Ref: DataSpacesTable
+          CONFIG_REGISTRY_TABLE_NAME:
+            Ref: ConfigRegistryTableName
+          CONFIG_PAYLOADS_BUCKET_NAME:
+            Ref: ConfigPayloadsBucketName
+          AUTH_SESSION_TABLE_NAME:
+            Ref: AuthSessionTableName
+          AUTH_USER_STATE_TABLE_NAME:
+            Ref: AuthUserStateTableName
+          ENVIRONMENT_NAME:
+            Ref: EnvironmentName
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:TransactWriteItems
+              Resource:
+                Fn::GetAtt:
+                  - DataSpacesTable
+                  - Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigRegistryTableName}
+                - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthSessionTableName}
+                - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AuthUserStateTableName}
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigPayloadsBucketName}/sites/*/versions/*/*/server/data-spaces.json
+                - Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigPayloadsBucketName}/sites/*/versions/*/*/server/auth-profile-registry.json
+      Events:
+        ProtectedAction:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DataSpacesApi
+            Path: /features/data-spaces/action
+            Method: POST
+
+  PublicReadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.public_read.lambda_handler
+      Description: Serves explicitly published public data-space records.
+      Environment:
+        Variables:
+          DATA_SPACES_TABLE_NAME:
+            Ref: DataSpacesTable
+          CONFIG_REGISTRY_TABLE_NAME:
+            Ref: ConfigRegistryTableName
+          CONFIG_PAYLOADS_BUCKET_NAME:
+            Ref: ConfigPayloadsBucketName
+          ENVIRONMENT_NAME:
+            Ref: EnvironmentName
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource:
+                Fn::GetAtt:
+                  - DataSpacesTable
+                  - Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigRegistryTableName}
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigPayloadsBucketName}/sites/*/versions/*/*/server/data-spaces.json
+      Events:
+        PublicRead:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DataSpacesApi
+            Path: /features/data-spaces/public-read
+            Method: POST
+
+  InternalSnapshotReadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.internal_snapshot_read.lambda_handler
+      Description: Returns one immutable record snapshot to authorized AWS callers.
+      Environment:
+        Variables:
+          DATA_SPACES_TABLE_NAME:
+            Ref: DataSpacesTable
+          CONFIG_REGISTRY_TABLE_NAME:
+            Ref: ConfigRegistryTableName
+          CONFIG_PAYLOADS_BUCKET_NAME:
+            Ref: ConfigPayloadsBucketName
+          ENVIRONMENT_NAME:
+            Ref: EnvironmentName
+          INTERNAL_SNAPSHOT_CALLER_ROLE_ARN:
+            Ref: InternalSnapshotCallerRoleArn
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                Fn::GetAtt:
+                  - DataSpacesTable
+                  - Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigRegistryTableName}
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                Fn::Sub: arn:${AWS::Partition}:s3:::${ConfigPayloadsBucketName}/sites/*/versions/*/*/server/data-spaces.json
+      Events:
+        InternalSnapshotRead:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: DataSpacesApi
+            Path: /internal/v1/data-spaces/record-snapshot
+            Method: POST
+            Auth:
+              Authorizer: AWS_IAM
+
+Outputs:
+  ApiUrl:
+    Description: Data Spaces API base URL.
+    Value:
+      Fn::Sub: https://${DataSpacesApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${EnvironmentName}
+  TableName:
+    Description: Data Spaces DynamoDB table name.
+    Value:
+      Ref: DataSpacesTable

@@ -1,0 +1,21 @@
+version = 0.1
+
+[test.deploy.parameters]
+stack_name = "zoolanding-data-spaces-test"
+resolve_s3 = true
+s3_prefix = "zoolanding-data-spaces-test"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+fail_on_empty_changeset = false
+parameter_overrides = ["EnvironmentName=test"]
+
+[prod.deploy.parameters]
+stack_name = "zoolanding-data-spaces-prod"
+resolve_s3 = true
+s3_prefix = "zoolanding-data-spaces-prod"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+fail_on_empty_changeset = false
+parameter_overrides = ["EnvironmentName=prod"]
