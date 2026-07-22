@@ -139,7 +139,12 @@ class Phase8InfrastructureTests(unittest.TestCase):
         )
 
     def test_alarms_cover_api_and_every_lambda_without_inventing_queues_or_streams(self):
-        required = {"Api5xxAlarm", "ApiLatencyAlarm", "TestLiveMismatchAlarm"}
+        required = {
+            "Api5xxAlarm",
+            "ApiLatencyAlarm",
+            "PublicRead4xxAlarm",
+            "TestLiveMismatchAlarm",
+        }
         for prefix in (
             "ProtectedRead",
             "ProtectedAction",
@@ -191,6 +196,40 @@ class Phase8InfrastructureTests(unittest.TestCase):
         )
         table = self.resources["DataSpacesTable"]["Properties"]
         self.assertNotIn("StreamSpecification", table)
+
+    def test_public_read_throttle_has_detailed_metrics_and_a_method_scoped_alarm(self):
+        self.assertEqual(
+            self.resources["DataSpacesApi"]["Properties"]["MethodSettings"],
+            [
+                {
+                    "HttpMethod": "POST",
+                    "ResourcePath": "/~1features~1data-spaces~1public-read",
+                    "MetricsEnabled": True,
+                    "ThrottlingRateLimit": 25,
+                    "ThrottlingBurstLimit": 50,
+                }
+            ],
+        )
+        alarm = self.resources["PublicRead4xxAlarm"]["Properties"]
+        self.assertEqual(alarm["Namespace"], "AWS/ApiGateway")
+        self.assertEqual(alarm["MetricName"], "4XXError")
+        self.assertEqual(alarm["Statistic"], "Sum")
+        self.assertEqual(alarm["Period"], 60)
+        self.assertEqual(alarm["EvaluationPeriods"], 1)
+        self.assertEqual(alarm["DatapointsToAlarm"], 1)
+        self.assertEqual(alarm["Threshold"], 1)
+        self.assertEqual(
+            alarm["ComparisonOperator"], "GreaterThanOrEqualToThreshold"
+        )
+        self.assertEqual(
+            alarm["Dimensions"],
+            [
+                {"Name": "ApiName", "Value": {"Fn::Sub": "${AWS::StackName}-api"}},
+                {"Name": "Stage", "Value": {"Ref": "EnvironmentName"}},
+                {"Name": "Resource", "Value": "/features/data-spaces/public-read"},
+                {"Name": "Method", "Value": "POST"},
+            ],
+        )
 
     def test_ci_runs_on_all_branches_and_deploys_reuse_only_the_validated_artifact(self):
         ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
@@ -282,6 +321,8 @@ class Phase8InfrastructureTests(unittest.TestCase):
             "publishes its exact role ARN",
             "403 `forbidden`",
             "exact caller ARN",
+            "combines 400, 403, and 429 responses",
+            "does not replace controlled load evidence",
         ):
             self.assertIn(required, readme)
         self.assertIn("dev -> test -> main", readme)

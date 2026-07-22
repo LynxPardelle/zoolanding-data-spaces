@@ -72,6 +72,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(method_settings, [{
             "HttpMethod": "POST",
             "ResourcePath": "/~1features~1data-spaces~1public-read",
+            "MetricsEnabled": "true",
             "ThrottlingRateLimit": "25",
             "ThrottlingBurstLimit": "50",
         }])

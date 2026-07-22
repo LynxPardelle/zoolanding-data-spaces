@@ -48,6 +48,7 @@ Resources:
       MethodSettings:
         - HttpMethod: POST
           ResourcePath: /~1features~1data-spaces~1public-read
+          MetricsEnabled: true
           ThrottlingRateLimit: 25
           ThrottlingBurstLimit: 50
       Tags:
@@ -343,6 +344,33 @@ Resources:
       EvaluationPeriods: 2
       DatapointsToAlarm: 2
       Threshold: 3000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  PublicRead4xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Public read method returned client-side errors, including possible throttling.
+      Namespace: AWS/ApiGateway
+      MetricName: 4XXError
+      Dimensions:
+        - Name: ApiName
+          Value:
+            Fn::Sub: ${AWS::StackName}-api
+        - Name: Stage
+          Value:
+            Ref: EnvironmentName
+        - Name: Resource
+          Value: /features/data-spaces/public-read
+        - Name: Method
+          Value: POST
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
