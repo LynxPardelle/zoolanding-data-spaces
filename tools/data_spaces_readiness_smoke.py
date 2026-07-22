@@ -41,6 +41,7 @@ _REQUIRED = (
 class SmokeRequest:
     url: str
     region: str
+    environment: str
     headers: dict[str, str]
     payload: dict[str, Any]
 
@@ -56,34 +57,82 @@ def run(
     sender: Callable[[SmokeRequest], SmokeResponse] | None = None,
     now_epoch: Callable[[], int] | None = None,
 ) -> dict[str, Any]:
+    observed_at = _observation_epoch(now_epoch)
     values = {name: environment.get(name, "").strip() for name in _REQUIRED}
     if any(not values[name] for name in _REQUIRED):
-        return _result(False, "missing_input", attempts=0)
+        return _result(False, "missing_input", None, observed_at, attempts=0)
     try:
         request = _request(values)
     except (UnicodeError, ValueError):
         request = None
     if request is None:
-        return _result(False, "missing_input", attempts=0)
+        return _result(False, "missing_input", None, observed_at, attempts=0)
     transport = sender or _send
     try:
         response = transport(request)
         status = response.status
     except Exception:
-        return _result(False, "provider_failure", attempts=1)
+        return _result(
+            False,
+            "provider_failure",
+            request.environment,
+            observed_at,
+            attempts=1,
+        )
     if type(status) is not int or not 100 <= status <= 599:
-        return _result(False, "provider_failure", attempts=1)
+        return _result(
+            False,
+            "provider_failure",
+            request.environment,
+            observed_at,
+            attempts=1,
+        )
     if 200 <= status <= 299:
-        return _result(True, "ready", status=status, attempts=1)
+        return _result(
+            True,
+            "ready",
+            request.environment,
+            observed_at,
+            status=status,
+            attempts=1,
+        )
     if status in {401, 403}:
-        return _result(False, "auth_failure", status=status, attempts=1)
+        return _result(
+            False,
+            "auth_failure",
+            request.environment,
+            observed_at,
+            status=status,
+            attempts=1,
+        )
     if status == 404 and _before_propagation_deadline(
-        environment, (now_epoch or (lambda: int(time.time())))()
+        environment, observed_at
     ):
-        return _result(False, "propagation_delay", status=status, attempts=1)
+        return _result(
+            False,
+            "propagation_delay",
+            request.environment,
+            observed_at,
+            status=status,
+            attempts=1,
+        )
     if 400 <= status <= 499:
-        return _result(False, "configuration_failure", status=status, attempts=1)
-    return _result(False, "provider_failure", status=status, attempts=1)
+        return _result(
+            False,
+            "configuration_failure",
+            request.environment,
+            observed_at,
+            status=status,
+            attempts=1,
+        )
+    return _result(
+        False,
+        "provider_failure",
+        request.environment,
+        observed_at,
+        status=status,
+        attempts=1,
+    )
 
 
 def _request(values: Mapping[str, str]) -> SmokeRequest | None:
@@ -130,6 +179,7 @@ def _request(values: Mapping[str, str]) -> SmokeRequest | None:
             "/internal/v1/data-spaces/record-snapshot"
         ),
         region=region,
+        environment=stage,
         headers={"X-ZLP-Domain": domain},
         payload={
             "spaceId": safe_ids[0],
@@ -192,6 +242,8 @@ def _before_propagation_deadline(
 def _result(
     ok: bool,
     classification: str,
+    environment: str | None,
+    observed_at: int,
     *,
     status: int | None = None,
     attempts: int,
@@ -199,11 +251,21 @@ def _result(
     result: dict[str, Any] = {
         "ok": ok,
         "classification": classification,
+        "environment": environment,
+        "observedAtEpoch": observed_at,
         "attempts": attempts,
     }
     if status is not None:
         result["httpStatus"] = status
     return result
+
+
+def _observation_epoch(now_epoch: Callable[[], int] | None) -> int:
+    try:
+        observed_at = (now_epoch or (lambda: int(time.time())))()
+    except Exception:
+        return 0
+    return observed_at if type(observed_at) is int and 0 <= observed_at <= 9_999_999_999 else 0
 
 
 def main() -> int:

@@ -275,6 +275,12 @@ class Phase8InfrastructureTests(unittest.TestCase):
                 )
             self.assertIn("ALARM_TOPIC_ARN: ${{ vars.ALARM_TOPIC_ARN }}", text)
             self.assertIn('"AlarmTopicArn=$ALARM_TOPIC_ARN"', text)
+            self.assertIn('cloudformation_account="${BASH_REMATCH[2]}"', text)
+            self.assertIn('alarm_region="${BASH_REMATCH[2]}"', text)
+            self.assertIn('[[ "$cloudformation_partition" = "$deployment_partition" ]]', text)
+            self.assertIn('[[ "$cloudformation_account" = "$deployment_account" ]]', text)
+            self.assertIn('[[ "$alarm_region" = "$AWS_REGION" ]]', text)
+            self.assertIn('[[ "$caller_account" = "$deployment_account" ]]', text)
             self.assertIn('if [[ -n "$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN" ]]; then', text)
             self.assertIn(
                 'parameter_overrides+=("InternalSnapshotCallerRoleArn=$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN")',

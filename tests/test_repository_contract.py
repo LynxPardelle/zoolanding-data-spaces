@@ -244,7 +244,12 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertEqual(text.count("promotion_target_tip_mismatch"), 2)
             self.assertEqual(text.count("promotion_pr_not_found"), 2)
             self.assertIn("AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}", text)
-            self.assertIn('[[ "$AWS_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$ ]]', text)
+            self.assertIn(
+                "role_pattern='^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role/",
+                text,
+            )
+            self.assertIn('[[ "$AWS_ROLE_ARN" =~ $role_pattern ]]', text)
+            self.assertIn('deployment_account="${BASH_REMATCH[2]}"', text)
             self.assertIn(
                 f"/zoolanding/{environment}/auth/user-state-table-name", text
             )

@@ -18,6 +18,7 @@ BASE_ENVIRONMENT = {
     "ZLP_DATA_SPACES_SMOKE_FIELD_IDS": "title",
     "AWS_REGION": "us-east-1",
 }
+NOW = 1_800_000_000
 
 
 class ReadinessSmokeTests(unittest.TestCase):
@@ -32,11 +33,18 @@ class ReadinessSmokeTests(unittest.TestCase):
             captured.append(request)
             return smoke.SmokeResponse(200)
 
-        result = smoke.run(BASE_ENVIRONMENT, sender=sender)
+        result = smoke.run(BASE_ENVIRONMENT, sender=sender, now_epoch=lambda: NOW)
 
         self.assertEqual(
             result,
-            {"ok": True, "classification": "ready", "httpStatus": 200, "attempts": 1},
+            {
+                "ok": True,
+                "classification": "ready",
+                "environment": "test",
+                "observedAtEpoch": NOW,
+                "httpStatus": 200,
+                "attempts": 1,
+            },
         )
         self.assertEqual(len(captured), 1)
         request = captured[0]
@@ -59,34 +67,46 @@ class ReadinessSmokeTests(unittest.TestCase):
 
     def test_five_failure_categories_are_closed_and_redacted(self):
         cases = (
-            ({}, None, None, "missing_input", 0),
-            (BASE_ENVIRONMENT, lambda _request: smoke.SmokeResponse(403), None, "auth_failure", 1),
-            (BASE_ENVIRONMENT, lambda _request: smoke.SmokeResponse(400), None, "configuration_failure", 1),
-            (BASE_ENVIRONMENT, lambda _request: smoke.SmokeResponse(500), None, "provider_failure", 1),
+            ({}, None, "missing_input", 0),
+            (BASE_ENVIRONMENT, lambda _request: smoke.SmokeResponse(403), "auth_failure", 1),
+            (BASE_ENVIRONMENT, lambda _request: smoke.SmokeResponse(400), "configuration_failure", 1),
+            (BASE_ENVIRONMENT, lambda _request: smoke.SmokeResponse(500), "provider_failure", 1),
             (
                 {
                     **BASE_ENVIRONMENT,
-                    "ZLP_DATA_SPACES_SMOKE_PROPAGATION_UNTIL_EPOCH": "130",
+                    "ZLP_DATA_SPACES_SMOKE_PROPAGATION_UNTIL_EPOCH": str(NOW + 30),
                 },
                 lambda _request: smoke.SmokeResponse(404),
-                lambda: 100,
                 "propagation_delay",
                 1,
             ),
         )
-        for environment, sender, now_epoch, classification, attempts in cases:
+        for environment, sender, classification, attempts in cases:
             with self.subTest(classification=classification):
                 kwargs = {}
                 if sender is not None:
                     kwargs["sender"] = sender
-                if now_epoch is not None:
-                    kwargs["now_epoch"] = now_epoch
+                kwargs["now_epoch"] = lambda: NOW
                 result = smoke.run(environment, **kwargs)
                 self.assertFalse(result["ok"])
                 self.assertEqual(result["classification"], classification)
                 self.assertEqual(result["attempts"], attempts)
+                self.assertEqual(result["observedAtEpoch"], NOW)
+                self.assertEqual(
+                    result["environment"],
+                    "test" if environment is BASE_ENVIRONMENT or environment else None,
+                )
                 self.assertTrue(
-                    set(result).issubset({"ok", "classification", "httpStatus", "attempts"})
+                    set(result).issubset(
+                        {
+                            "ok",
+                            "classification",
+                            "environment",
+                            "observedAtEpoch",
+                            "httpStatus",
+                            "attempts",
+                        }
+                    )
                 )
 
     def test_transport_failure_and_non_propagating_not_found_are_distinct(self):
@@ -94,18 +114,26 @@ class ReadinessSmokeTests(unittest.TestCase):
             raise RuntimeError("synthetic credential detail")
 
         self.assertEqual(
-            smoke.run(BASE_ENVIRONMENT, sender=unavailable),
-            {"ok": False, "classification": "provider_failure", "attempts": 1},
+            smoke.run(BASE_ENVIRONMENT, sender=unavailable, now_epoch=lambda: NOW),
+            {
+                "ok": False,
+                "classification": "provider_failure",
+                "environment": "test",
+                "observedAtEpoch": NOW,
+                "attempts": 1,
+            },
         )
         self.assertEqual(
             smoke.run(
                 BASE_ENVIRONMENT,
                 sender=lambda _request: smoke.SmokeResponse(404),
-                now_epoch=lambda: 100,
+                now_epoch=lambda: NOW,
             ),
             {
                 "ok": False,
                 "classification": "configuration_failure",
+                "environment": "test",
+                "observedAtEpoch": NOW,
                 "httpStatus": 404,
                 "attempts": 1,
             },
@@ -127,10 +155,17 @@ class ReadinessSmokeTests(unittest.TestCase):
                 result = smoke.run(
                     environment,
                     sender=lambda _request: self.fail("transport must not run"),
+                    now_epoch=lambda: NOW,
                 )
                 self.assertEqual(
                     result,
-                    {"ok": False, "classification": "missing_input", "attempts": 0},
+                    {
+                        "ok": False,
+                        "classification": "missing_input",
+                        "environment": None,
+                        "observedAtEpoch": NOW,
+                        "attempts": 0,
+                    },
                 )
 
     def test_script_has_no_cli_credential_or_raw_transport_output(self):
