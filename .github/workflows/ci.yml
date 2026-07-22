@@ -2,9 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [dev, test, main, 'codex/**']
   pull_request:
-    branches: [dev, test, main]
 
 permissions:
   contents: read
@@ -86,10 +84,8 @@ jobs:
           set -euo pipefail
           sam validate --lint
           sam build --no-cached
-          PYTHONPATH=.aws-sam/build/ProtectedReadFunction python -c "from handlers.protected_read import lambda_handler; assert callable(lambda_handler)"
-          PYTHONPATH=.aws-sam/build/ProtectedActionFunction python -c "from handlers.protected_action import lambda_handler; assert callable(lambda_handler)"
-          PYTHONPATH=.aws-sam/build/PublicReadFunction python -c "from handlers.public_read import lambda_handler; assert callable(lambda_handler)"
-          PYTHONPATH=.aws-sam/build/InternalSnapshotReadFunction python -c "from handlers.internal_snapshot_read import lambda_handler; assert callable(lambda_handler)"
+          test -z "$(find .aws-sam/build -type l -print -quit)"
+          python tools/verify_sam_build.py
           : > "$RUNNER_TEMP/expected-build-paths.txt"
           for function in ProtectedReadFunction ProtectedActionFunction PublicReadFunction InternalSnapshotReadFunction; do
             git ls-files 'src/**' | while IFS= read -r path; do

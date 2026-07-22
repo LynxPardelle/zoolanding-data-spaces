@@ -1,6 +1,7 @@
 import io
 import json
 import unittest
+from contextlib import redirect_stdout
 
 import src.common.published_policy as published_policy
 from src.common.published_policy import (
@@ -215,16 +216,17 @@ class PublishedPolicyResolverTests(unittest.TestCase):
         self.assertEqual(resolved.environment, "production")
         self.assertEqual(resolved.version_id, "prod-v1")
 
-    def test_server_stack_prod_alias_resolves_production_descriptor(self):
+    def test_server_stack_rejects_prod_alias_before_aws_reads(self):
         prefix = f"sites/{DOMAIN}/versions/prod-v1/"
         self.metadata["published"] = {"versionId": "prod-v1", "prefix": prefix}
         self.s3.objects[f"{prefix}{DOMAIN}/server/data-spaces.json"] = data_spaces_policy("production")
         self.s3.objects[f"{prefix}{DOMAIN}/server/auth-profile-registry.json"] = auth_registry()
 
-        resolved = self.resolve(environment="prod")
+        with self.assertRaises(PolicyResolutionError):
+            self.resolve(environment="prod")
 
-        self.assertEqual(resolved.environment, "production")
-        self.assertEqual(resolved.scope["environment"], "production")
+        self.assertEqual(self.table.calls, [])
+        self.assertEqual(self.s3.calls, [])
 
     def test_rejects_unsupported_environment_before_aws_reads(self):
         with self.assertRaises(PolicyResolutionError):
@@ -287,8 +289,9 @@ class PublishedPolicyResolverTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.setUp()
                 mutate()
-                with self.assertRaises(PolicyResolutionError):
-                    self.resolve()
+                with redirect_stdout(io.StringIO()):
+                    with self.assertRaises(PolicyResolutionError):
+                        self.resolve()
 
     def test_rejects_missing_disabled_or_invalid_policy(self):
         cases = (

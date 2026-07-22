@@ -212,12 +212,21 @@ class HandlerTests(unittest.TestCase):
         ):
             return public_read.lambda_handler(event, None), resolver
 
-    def internal_read(self, payload, *, principal_arn=INTERNAL_CALLER_SESSION_ARN):
+    def internal_read(
+        self,
+        payload,
+        *,
+        principal_arn=INTERNAL_CALLER_SESSION_ARN,
+        configured_role_arn=INTERNAL_CALLER_ROLE_ARN,
+    ):
         event = api_event("/internal/v1/data-spaces/record-snapshot", payload)
         if principal_arn is not None:
             event["requestContext"]["identity"] = {"userArn": principal_arn}
         with (
-            patch.dict(os.environ, {"INTERNAL_SNAPSHOT_CALLER_ROLE_ARN": INTERNAL_CALLER_ROLE_ARN}),
+            patch.dict(
+                os.environ,
+                {"INTERNAL_SNAPSHOT_CALLER_ROLE_ARN": configured_role_arn},
+            ),
             patch.object(internal_snapshot_read, "resolve_data_spaces_policy", return_value=self.resolved) as resolver,
             patch.object(internal_snapshot_read, "_store", return_value=self.store),
         ):
@@ -515,6 +524,22 @@ class HandlerTests(unittest.TestCase):
                 self.assertEqual(response_body(response)["code"], "forbidden")
                 resolver.assert_not_called()
                 self.assertEqual(self.store.calls, [])
+
+    def test_internal_snapshot_is_forbidden_while_caller_role_is_disabled(self):
+        payload = {
+            "spaceId": SPACE_ID,
+            "collectionId": "articles",
+            "recordId": "welcome",
+            "revision": 4,
+            "fieldIds": ["title"],
+        }
+
+        response, resolver = self.internal_read(payload, configured_role_arn="")
+
+        self.assertEqual(response["statusCode"], 403)
+        self.assertEqual(response_body(response)["code"], "forbidden")
+        resolver.assert_not_called()
+        self.assertEqual(self.store.calls, [])
 
     def test_internal_snapshot_accepts_exact_configured_role_arn(self):
         response, resolver = self.internal_read({

@@ -7,22 +7,22 @@ Parameters:
     Type: String
     AllowedValues:
       - test
-      - prod
+      - production
   ConfigRegistryTableName:
-    Type: String
-    MinLength: 3
+    Type: AWS::SSM::Parameter::Value<String>
   ConfigPayloadsBucketName:
-    Type: String
-    MinLength: 3
+    Type: AWS::SSM::Parameter::Value<String>
   AuthSessionTableName:
-    Type: String
-    MinLength: 3
+    Type: AWS::SSM::Parameter::Value<String>
   AuthUserStateTableName:
-    Type: String
-    MinLength: 3
+    Type: AWS::SSM::Parameter::Value<String>
   InternalSnapshotCallerRoleArn:
     Type: String
-    AllowedPattern: ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$
+    Default: ''
+    AllowedPattern: ^$|^arn:(aws|aws-us-gov|aws-cn):iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$
+  AlarmTopicArn:
+    Type: String
+    AllowedPattern: ^arn:(aws|aws-us-gov|aws-cn):sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_.-]+$
 
 Globals:
   Function:
@@ -41,6 +41,8 @@ Resources:
   DataSpacesApi:
     Type: AWS::Serverless::Api
     Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-api
       StageName:
         Ref: EnvironmentName
       MethodSettings:
@@ -54,6 +56,15 @@ Resources:
         ManagedBy: SAM
         Environment:
           Ref: EnvironmentName
+
+  DataSpacesApiIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        Fn::Sub: /zoolanding/${EnvironmentName}/services/data-spaces/api-id
+      Type: String
+      Value:
+        Ref: DataSpacesApi
 
   DataSpacesTable:
     Type: AWS::DynamoDB::Table
@@ -291,7 +302,321 @@ Resources:
             Auth:
               Authorizer: AWS_IAM
 
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Data Spaces API returned a server error.
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiName
+          Value:
+            Fn::Sub: ${AWS::StackName}-api
+        - Name: Stage
+          Value:
+            Ref: EnvironmentName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  ApiLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Data Spaces API latency exceeded the operational target.
+      Namespace: AWS/ApiGateway
+      MetricName: Latency
+      Dimensions:
+        - Name: ApiName
+          Value:
+            Fn::Sub: ${AWS::StackName}-api
+        - Name: Stage
+          Value:
+            Ref: EnvironmentName
+      ExtendedStatistic: p95
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 3000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  ProtectedReadErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Protected read Lambda returned an error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: ProtectedReadFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  ProtectedReadDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Protected read Lambda duration approached its timeout.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: ProtectedReadFunction
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 8000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  ProtectedReadThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Protected read Lambda was throttled.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: ProtectedReadFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  ProtectedActionErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Protected action Lambda returned an error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: ProtectedActionFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  ProtectedActionDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Protected action Lambda duration approached its timeout.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: ProtectedActionFunction
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 8000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  ProtectedActionThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Protected action Lambda was throttled.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: ProtectedActionFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  PublicReadErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Public read Lambda returned an error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: PublicReadFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  PublicReadDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Public read Lambda duration approached its timeout.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: PublicReadFunction
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 8000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  PublicReadThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Public read Lambda was throttled.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: PublicReadFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  InternalSnapshotReadErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Internal snapshot read Lambda returned an error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: InternalSnapshotReadFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  InternalSnapshotReadDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Internal snapshot read Lambda duration approached its timeout.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: InternalSnapshotReadFunction
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 8000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  InternalSnapshotReadThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Internal snapshot read Lambda was throttled.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: InternalSnapshotReadFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
+  TestLiveMismatchAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Published Data Spaces policy environment did not match the deployed environment.
+      Namespace: Zoolanding/DataSpaces
+      MetricName: TestLiveMismatch
+      Dimensions:
+        - Name: Environment
+          Value:
+            Ref: EnvironmentName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlarmTopicArn
+
 Outputs:
+  DataSpacesApiId:
+    Description: Data Spaces REST API identifier.
+    Value:
+      Ref: DataSpacesApi
+  DataSpacesApiIdParameterName:
+    Description: SSM parameter that publishes the Data Spaces REST API identifier.
+    Value:
+      Ref: DataSpacesApiIdParameter
   ApiUrl:
     Description: Data Spaces API base URL.
     Value:
