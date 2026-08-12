@@ -124,6 +124,42 @@ class SchemaPolicyTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(SchemaPolicyError):
                 validate_schema(schema, max_fields=10)
 
+    def test_rejects_provider_mapping_resource_and_infrastructure_field_ids(self):
+        names = [
+            "providerAccountId",
+            "connectedAccount",
+            "stripeAccount",
+            "providerId",
+            "externalAccount",
+            "externalResourceId",
+            "stripeCustomerId",
+            "resourceArn",
+            "ssmParameter",
+            "parameterStoreRef",
+            "secretsManagerRef",
+        ]
+
+        for name in names:
+            schema = {"fields": [{"id": name, "type": "string", "classification": "internal"}]}
+            with self.subTest(name=name), self.assertRaisesRegex(
+                SchemaPolicyError,
+                "provider or infrastructure field is not allowed",
+            ):
+                validate_schema(schema, max_fields=10)
+
+    def test_keeps_innocuous_generic_field_ids_available(self):
+        names = ["provider", "domain", "environment", "access", "role", "policy", "groups", "account"]
+        schema = {
+            "fields": [
+                {"id": name, "type": "string", "classification": "internal"}
+                for name in names
+            ]
+        }
+
+        checked = validate_schema(schema, max_fields=10)
+
+        self.assertEqual([field["id"] for field in checked["fields"]], names)
+
     def test_rejects_case_confusable_duplicate_field_ids(self):
         schema = {
             "fields": [
@@ -271,6 +307,61 @@ class SchemaPolicyTests(unittest.TestCase):
         for value in unsafe_values:
             with self.subTest(value=value), self.assertRaises(SchemaPolicyError):
                 validate_record(schema, {"title": value}, max_record_bytes=10_000)
+
+    def test_rejects_provider_resource_ids_and_infrastructure_references_as_values(self):
+        schema = validate_schema(valid_schema(), max_fields=20)
+        unsafe_values = [
+            "acct_1SyntheticAccount",
+            "cus_1SyntheticCustomer",
+            "sub_1SyntheticSubscription",
+            "price_1SyntheticPrice",
+            "prod_1SyntheticProduct",
+            "pm_1SyntheticMethod",
+            "pi_1SyntheticIntent",
+            "cs_1SyntheticSession",
+            "cs_test_1SyntheticSession",
+            "in_1SyntheticInvoice",
+            "evt_1SyntheticEvent",
+            "arn:aws:secretsmanager:us-east-1:123456789012:secret:synthetic",
+            "ssm:/zoolanding/test/services/data-spaces/api-id",
+            "secretsmanager:/zoolanding/test/tenant/draft/notifications/smtp/example",
+            "/zoolanding/test/services/data-spaces/api-id",
+            "{{resolve:ssm:/zoolanding/test/services/data-spaces/api-id}}",
+            "{{resolve:secretsmanager:/synthetic}}",
+        ]
+
+        for value in unsafe_values:
+            with self.subTest(value=value), self.assertRaisesRegex(
+                SchemaPolicyError,
+                "provider or infrastructure reference is not allowed",
+            ):
+                validate_record(schema, {"title": value}, max_record_bytes=10_000)
+
+        for field_id in ("heroAsset", "relatedRecord"):
+            with self.subTest(field_id=field_id), self.assertRaisesRegex(
+                SchemaPolicyError,
+                "provider or infrastructure reference is not allowed",
+            ):
+                validate_record(
+                    schema,
+                    {"title": "safe", field_id: "acct_1syntheticaccount"},
+                    max_record_bytes=10_000,
+                )
+
+    def test_plain_generic_in_progress_value_is_not_treated_as_a_stripe_invoice_id(self):
+        schema = validate_schema(valid_schema(), max_fields=20)
+
+        checked = validate_record(schema, {"title": "in_progress"}, max_record_bytes=10_000)
+
+        self.assertEqual(checked["title"], "in_progress")
+
+    def test_short_editorial_tokens_are_not_treated_as_provider_resource_ids(self):
+        schema = validate_schema(valid_schema(), max_fields=20)
+
+        for value in ("sub_heading", "price_medium", "prod_gallery", "evt_summary"):
+            with self.subTest(value=value):
+                checked = validate_record(schema, {"title": value}, max_record_bytes=10_000)
+                self.assertEqual(checked["title"], value)
 
     def test_plain_text_starting_with_set_is_not_mistaken_for_a_database_expression(self):
         schema = validate_schema(valid_schema(), max_fields=20)

@@ -55,6 +55,21 @@ EXECUTABLE_RE = re.compile(
     r"^\s*REMOVE\s+#[A-Za-z0-9_]+)",
     re.IGNORECASE,
 )
+PROVIDER_RESOURCE_ID_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:"
+    r"(?:acct|cus|sub|price|prod|pm|pi|evt)_[A-Za-z0-9]{12,}|"
+    r"cs_(?:(?:test|live)_)?[A-Za-z0-9]{12,}|"
+    r"in_(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{12,}"
+    r")(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+INFRA_REFERENCE_RE = re.compile(
+    r"(?:\{\{\s*resolve:(?:ssm(?:-secure)?|secretsmanager):|"
+    r"\barn:aws(?:-us-gov|-cn)?:[a-z0-9-]+:|"
+    r"(?<![a-z0-9])(?:ssm|ssm-secure|secretsmanager|secrets-manager|aws-secretsmanager):(?://|/)|"
+    r"(?<![A-Za-z0-9])/(?:zoolanding|zoolandingpage)/(?:test|production)/)",
+    re.IGNORECASE,
+)
 
 _COMMON_KEYS = frozenset({"id", "type", "classification", "required", "label"})
 _TYPE_KEYS = {
@@ -145,6 +160,21 @@ _RESTRICTED_PAIRS = frozenset(
     }
 )
 _COMMERCIAL_TOKENS = frozenset({"price", "cost", "amount"})
+_PROVIDER_OR_INFRA_FIELD_IDS = frozenset(
+    {
+        "account_id",
+        "connected_account",
+        "external_account",
+        "provider_account",
+        "provider_account_id",
+        "provider_id",
+        "resource_arn",
+        "resource_id",
+        "secrets_manager_ref",
+        "ssm_parameter",
+        "stripe_account",
+    }
+)
 
 
 class SchemaPolicyError(ValueError):
@@ -319,6 +349,21 @@ def _validate_field_name(field_id: str, field_type: str, presentation_only: bool
     normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", field_id)
     tokens = [token for token in re.sub(r"[^a-z0-9]+", "_", normalized.lower()).split("_") if token]
     joined = "_".join(tokens)
+    if (
+        joined in _PROVIDER_OR_INFRA_FIELD_IDS
+        or any(token in {"arn", "aws", "ssm"} for token in tokens)
+        or ("secrets" in tokens and "manager" in tokens)
+        or ("parameter" in tokens and "store" in tokens)
+        or (
+            "provider" in tokens
+            and any(token in {"account", "id", "mapping", "ref", "reference", "resource"} for token in tokens)
+        )
+        or (
+            any(token in {"connected", "external", "stripe"} for token in tokens)
+            and any(token in {"account", "customer", "id", "mapping", "ref", "reference", "resource"} for token in tokens)
+        )
+    ):
+        raise SchemaPolicyError("provider or infrastructure field is not allowed")
     if any(token in _RESTRICTED_SINGLE_TOKENS for token in tokens) or any(pair in joined for pair in _RESTRICTED_PAIRS):
         raise SchemaPolicyError("restricted field class is not allowed")
     if any(token in _COMMERCIAL_TOKENS for token in tokens) and not (field_type == "money-display" and presentation_only):
@@ -394,6 +439,8 @@ def _validate_value(field: Mapping[str, Any], value: Any) -> Any:
             raise SchemaPolicyError("money-display currency is invalid", "invalid_record")
         return {"amountMinor": amount, "currency": currency}
     if field_type in {"asset-reference", "relation-id"}:
+        if isinstance(value, str):
+            _reject_provider_or_infra_reference(value)
         if not isinstance(value, str) or not SAFE_REFERENCE_RE.fullmatch(value):
             raise SchemaPolicyError(f"{field_type} must be a same-space safe id", "invalid_record")
         return value
@@ -428,8 +475,14 @@ def _validate_plain_text(value: Any, max_length: int, label: str) -> None:
 
 
 def _reject_unsafe_value(value: str) -> None:
+    _reject_provider_or_infra_reference(value)
     if any(
         pattern.search(value)
         for pattern in (URL_RE, HTML_RE, EMAIL_RE, PHONE_RE, PAYMENT_NUMBER_RE, RFC_RE, CURP_RE, SECRET_VALUE_RE, EXECUTABLE_RE)
     ):
         raise SchemaPolicyError("restricted or executable text is not allowed", "invalid_record")
+
+
+def _reject_provider_or_infra_reference(value: str) -> None:
+    if PROVIDER_RESOURCE_ID_RE.search(value) or INFRA_REFERENCE_RE.search(value):
+        raise SchemaPolicyError("provider or infrastructure reference is not allowed", "invalid_record")
