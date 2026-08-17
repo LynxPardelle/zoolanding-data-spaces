@@ -213,6 +213,20 @@ class RepositoryContractTests(unittest.TestCase):
             ci_text,
         )
         self.assertIn("fetch-depth: 0", ci_text)
+        self.assertRegex(
+            ci_text,
+            r"(?m)^permissions:\n  contents: read\n  pull-requests: read$",
+        )
+        self.assertIn("cancel-in-progress: true", ci_text)
+        self.assertEqual(ci_text.count("timeout-minutes:"), 2)
+        self.assertLess(
+            ci_text.index("Verify exact clean commit"),
+            ci_text.index("Scan committed secrets"),
+        )
+        self.assertLess(
+            ci_text.index("Validate exact SAM build"),
+            ci_text.index("Scan committed secrets"),
+        )
 
         expected_artifact_paths = {
             ".aws-sam/build/template.yaml",
