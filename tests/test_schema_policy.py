@@ -268,6 +268,59 @@ class SchemaPolicyTests(unittest.TestCase):
             },
         )
 
+    def test_public_projection_filters_internal_fields_inside_nested_arrays(self):
+        schema = validate_schema(
+            {
+                "fields": [
+                    {
+                        "id": "rows",
+                        "type": "array",
+                        "classification": "public",
+                        "maxItems": 2,
+                        "items": {
+                            "type": "array",
+                            "maxItems": 2,
+                            "items": {
+                                "type": "object",
+                                "fields": [
+                                    {
+                                        "id": "label",
+                                        "type": "string",
+                                        "classification": "public",
+                                    },
+                                    {
+                                        "id": "internalNote",
+                                        "type": "string",
+                                        "classification": "internal",
+                                    },
+                                ],
+                            },
+                        },
+                    }
+                ]
+            },
+            max_fields=10,
+        )
+        values = validate_record(
+            schema,
+            {
+                "rows": [
+                    [
+                        {
+                            "label": "public value",
+                            "internalNote": "must never be published",
+                        }
+                    ]
+                ]
+            },
+            max_record_bytes=10_000,
+        )
+
+        self.assertEqual(
+            public_projection(schema, values),
+            {"rows": [[{"label": "public value"}]]},
+        )
+
     def test_rejects_missing_unknown_mistyped_and_oversized_record_values(self):
         schema = validate_schema(valid_schema(), max_fields=20)
         cases = [

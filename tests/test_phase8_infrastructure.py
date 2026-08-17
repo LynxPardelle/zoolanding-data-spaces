@@ -273,7 +273,7 @@ class Phase8InfrastructureTests(unittest.TestCase):
                 self.assertIn(
                     f'"{variable}=/zoolanding/{environment}/{suffix}"', text
                 )
-            self.assertIn("ALARM_TOPIC_ARN: ${{ vars.ALARM_TOPIC_ARN }}", text)
+            self.assertIn("ALARM_TOPIC_ARN: ${{ secrets.ALARM_TOPIC_ARN }}", text)
             self.assertIn('"AlarmTopicArn=$ALARM_TOPIC_ARN"', text)
             self.assertIn('cloudformation_account="${BASH_REMATCH[2]}"', text)
             self.assertIn('alarm_region="${BASH_REMATCH[2]}"', text)

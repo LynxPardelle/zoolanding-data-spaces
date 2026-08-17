@@ -165,14 +165,14 @@ jobs:
       id-token: write
       pull-requests: read
     env:
-      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
-      AWS_CLOUDFORMATION_ROLE_ARN: ${{ vars.AWS_CLOUDFORMATION_ROLE_ARN }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_CLOUDFORMATION_ROLE_ARN: ${{ secrets.AWS_CLOUDFORMATION_ROLE_ARN }}
       CONFIG_REGISTRY_TABLE_PARAMETER: /zoolanding/test/config/registry-table-name
       CONFIG_PAYLOADS_BUCKET_PARAMETER: /zoolanding/test/config/payload-bucket-name
       AUTH_SESSION_TABLE_PARAMETER: /zoolanding/test/auth/session-table-name
       AUTH_USER_STATE_TABLE_PARAMETER: /zoolanding/test/auth/user-state-table-name
-      INTERNAL_SNAPSHOT_CALLER_ROLE_ARN: ${{ vars.INTERNAL_SNAPSHOT_CALLER_ROLE_ARN }}
-      ALARM_TOPIC_ARN: ${{ vars.ALARM_TOPIC_ARN }}
+      INTERNAL_SNAPSHOT_CALLER_ROLE_ARN: ${{ secrets.INTERNAL_SNAPSHOT_CALLER_ROLE_ARN }}
+      ALARM_TOPIC_ARN: ${{ secrets.ALARM_TOPIC_ARN }}
     steps:
       - name: Validate artifact metadata
         id: artifact
@@ -304,6 +304,7 @@ jobs:
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: us-east-1
+          mask-aws-account-id: true
 
       - name: Validate exact cross-service SSM values
         shell: bash

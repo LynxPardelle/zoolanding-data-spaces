@@ -208,6 +208,11 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("pip-audit==2.10.1", ci_text)
         self.assertIn("python -m pip_audit -r requirements.txt", ci_text)
         self.assertIn("PYTHONDONTWRITEBYTECODE: 1", ci_text)
+        self.assertIn(
+            "gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7",
+            ci_text,
+        )
+        self.assertIn("fetch-depth: 0", ci_text)
 
         expected_artifact_paths = {
             ".aws-sam/build/template.yaml",
@@ -243,7 +248,7 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertEqual(text.count("actions/github-script@"), 2)
             self.assertEqual(text.count("promotion_target_tip_mismatch"), 2)
             self.assertEqual(text.count("promotion_pr_not_found"), 2)
-            self.assertIn("AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}", text)
+            self.assertIn("AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}", text)
             self.assertIn(
                 "role_pattern='^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role/",
                 text,
@@ -254,17 +259,19 @@ class RepositoryContractTests(unittest.TestCase):
                 f"/zoolanding/{environment}/auth/user-state-table-name", text
             )
             self.assertIn("aws ssm get-parameter", text)
-            self.assertIn("INTERNAL_SNAPSHOT_CALLER_ROLE_ARN: ${{ vars.INTERNAL_SNAPSHOT_CALLER_ROLE_ARN }}", text)
+            self.assertIn("INTERNAL_SNAPSHOT_CALLER_ROLE_ARN: ${{ secrets.INTERNAL_SNAPSHOT_CALLER_ROLE_ARN }}", text)
             self.assertIn('if [[ -n "$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN" ]]; then', text)
             self.assertIn(
                 'parameter_overrides+=("InternalSnapshotCallerRoleArn=$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN")',
                 text,
             )
-            self.assertIn("ALARM_TOPIC_ARN: ${{ vars.ALARM_TOPIC_ARN }}", text)
+            self.assertIn("ALARM_TOPIC_ARN: ${{ secrets.ALARM_TOPIC_ARN }}", text)
+            self.assertNotIn("${{ vars.", text)
             self.assertIn('"AlarmTopicArn=$ALARM_TOPIC_ARN"', text)
             second_provenance = text.rfind("actions/github-script@")
             credentials = text.index("aws-actions/configure-aws-credentials@")
             self.assertLess(second_provenance, credentials)
+            self.assertIn("mask-aws-account-id: true", text)
             upload = next(
                 step
                 for step in workflow["jobs"]["validate"]["steps"]

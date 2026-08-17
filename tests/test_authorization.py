@@ -130,6 +130,27 @@ class FakeDynamo:
         return FailingTable()
 
 
+class RecordingTable:
+    def __init__(self, item):
+        self.item = item
+        self.calls = []
+
+    def get_item(self, **request):
+        self.calls.append(request)
+        return {"Item": dict(self.item)}
+
+
+class RecordingDynamo:
+    def __init__(self):
+        self.tables = {
+            "sessions": RecordingTable({"sessionIdHash": "synthetic-hash"}),
+            "users": RecordingTable({"enabled": True}),
+        }
+
+    def Table(self, name):
+        return self.tables[name]
+
+
 class AuthorizationTests(unittest.TestCase):
     def setUp(self):
         self.policies = policies()
@@ -175,6 +196,30 @@ class AuthorizationTests(unittest.TestCase):
 
         self.assertIsNone(caught.exception.__cause__)
         self.assertNotIn("provider", str(caught.exception))
+
+    def test_auth_store_reads_current_session_and_user_state_consistently(self):
+        dynamo = RecordingDynamo()
+        store = DynamoAuthStore("sessions", "users", dynamo)
+
+        store.get_session("synthetic-hash")
+        store.get_user("tenant#profile#test", "USER#admin-sub")
+
+        self.assertEqual(
+            dynamo.tables["sessions"].calls,
+            [{"Key": {"sessionIdHash": "synthetic-hash"}, "ConsistentRead": True}],
+        )
+        self.assertEqual(
+            dynamo.tables["users"].calls,
+            [
+                {
+                    "Key": {
+                        "tenantProfileKey": "tenant#profile#test",
+                        "userKey": "USER#admin-sub",
+                    },
+                    "ConsistentRead": True,
+                }
+            ],
+        )
 
     def test_auth_module_imports_from_sam_code_uri_root(self):
         result = subprocess.run(
