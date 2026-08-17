@@ -15,7 +15,7 @@
   usan sólo `secrets.*` y enmascaran el ID de cuenta AWS.
 - `dev`, `test` y `main` exigen PR y CI estricto, incluyen a administradores,
   resuelven conversaciones y bloquean force-push y borrado. Secret scanning,
-  push protection, patrones no-proveedor y validación de credenciales están activos.
+  push protection y actualizaciones de seguridad de Dependabot están activos.
 - La proyección pública filtra campos internos también dentro de arreglos anidados
   y las lecturas de sesión/usuario son fuertemente consistentes.
 - Validación local: 111/111 pruebas pasaron tres veces, compilación, SAM lint,
