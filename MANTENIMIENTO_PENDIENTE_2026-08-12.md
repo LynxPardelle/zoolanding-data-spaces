@@ -10,7 +10,7 @@
   y `main`, respectivamente.
 - Roles OIDC/CloudFormation y topic de alarmas están copiados a secretos de cada
   GitHub Environment, sin credenciales AWS estáticas. Las variables duplicadas
-  deben eliminarse sólo después de verificar este workflow en GitHub.
+  fueron eliminadas después de verificar correctamente la CI del commit `c3e0f46`.
 - La CI ejecuta Gitleaks fijado por SHA sobre el historial completo. Los workflows
   usan sólo `secrets.*` y enmascaran el ID de cuenta AWS.
 - La proyección pública filtra campos internos también dentro de arreglos anidados
