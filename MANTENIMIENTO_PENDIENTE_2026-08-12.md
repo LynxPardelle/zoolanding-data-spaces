@@ -2,7 +2,7 @@
 
 ## Publicación y automatización
 
-- Origen canónico: `https://github.com/LynxPardelle/zoolanding-data-spaces`.
+- Origen canónico público: `https://github.com/LynxPardelle/zoolanding-data-spaces`.
 - Ramas base publicadas: `main`, `test` y `dev`; promoción prevista `dev -> test -> main`.
 - GitHub Actions tiene permisos de lectura por defecto. CI valida cada push y pull
   request; los despliegues sólo escuchan las ramas `test` o `main`.
@@ -13,6 +13,9 @@
   fueron eliminadas después de verificar correctamente la CI del commit `c3e0f46`.
 - La CI ejecuta Gitleaks fijado por SHA sobre el historial completo. Los workflows
   usan sólo `secrets.*` y enmascaran el ID de cuenta AWS.
+- `dev`, `test` y `main` exigen PR y CI estricto, incluyen a administradores,
+  resuelven conversaciones y bloquean force-push y borrado. Secret scanning,
+  push protection, patrones no-proveedor y validación de credenciales están activos.
 - La proyección pública filtra campos internos también dentro de arreglos anidados
   y las lecturas de sesión/usuario son fuertemente consistentes.
 - Validación local: 111/111 pruebas pasaron tres veces, compilación, SAM lint,
