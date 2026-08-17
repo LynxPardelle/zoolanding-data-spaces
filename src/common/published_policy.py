@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from .metrics import emit_metric
+
 
 MAX_DESCRIPTOR_BYTES = 256 * 1024
 MAX_JSON_DEPTH = 32
@@ -238,6 +240,15 @@ def _validate_data_spaces(
     domain: str,
 ) -> None:
     scope = policy.get("scope")
+    if (
+        isinstance(scope, dict)
+        and scope.get("environment") in ENVIRONMENTS
+        and scope.get("environment") != environment
+    ):
+        try:
+            emit_metric("TestLiveMismatch", 1, environment=environment)
+        except Exception:
+            pass
     expected = {
         "environment": environment,
         "tenantId": tenant_id,
@@ -335,8 +346,6 @@ def _environment(value: Any) -> str:
     if not isinstance(value, str):
         raise PolicyResolutionError("Policy environment is invalid")
     environment = value.strip().lower()
-    if environment == "prod":
-        environment = "production"
     if environment not in ENVIRONMENTS:
         raise PolicyResolutionError("Policy environment is invalid")
     return environment

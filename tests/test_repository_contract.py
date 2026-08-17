@@ -72,6 +72,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(method_settings, [{
             "HttpMethod": "POST",
             "ResourcePath": "/~1features~1data-spaces~1public-read",
+            "MetricsEnabled": "true",
             "ThrottlingRateLimit": "25",
             "ThrottlingBurstLimit": "50",
         }])
@@ -80,7 +81,7 @@ class RepositoryContractTests(unittest.TestCase):
         template = load_yaml(ROOT / "template.yaml")
         self.assertEqual(template["Globals"]["Function"]["Runtime"], "python3.13")
         environment = template["Parameters"]["EnvironmentName"]
-        self.assertEqual(environment["AllowedValues"], ["test", "prod"])
+        self.assertEqual(environment["AllowedValues"], ["test", "production"])
         self.assertNotIn("Default", environment)
 
         functions = [
@@ -124,7 +125,12 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(internal_variables["INTERNAL_SNAPSHOT_CALLER_ROLE_ARN"], {"Ref": "InternalSnapshotCallerRoleArn"})
         caller_parameter = template["Parameters"]["InternalSnapshotCallerRoleArn"]
         self.assertEqual(caller_parameter["Type"], "String")
-        self.assertNotIn("Default", caller_parameter)
+        self.assertIn("Default", caller_parameter)
+        self.assertEqual(caller_parameter["Default"], "")
+        self.assertEqual(
+            caller_parameter["AllowedPattern"],
+            r"^$|^arn:(aws|aws-us-gov|aws-cn):iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$",
+        )
 
     def test_template_owns_one_on_demand_encrypted_recoverable_ttl_table_without_indexes(self):
         template = load_yaml(ROOT / "template.yaml")
@@ -175,7 +181,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(s3_resources("PublicReadFunction"), {data_descriptor})
         self.assertEqual(s3_resources("InternalSnapshotReadFunction"), {data_descriptor})
 
-    def test_dependency_and_sam_configs_are_closed_to_test_and_prod(self):
+    def test_dependency_and_sam_configs_are_closed_to_test_and_production(self):
         requirements = [
             line.strip()
             for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
@@ -184,12 +190,12 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(requirements, ["boto3==1.39.13"])
 
         config = tomllib.loads((ROOT / "samconfig.toml").read_text(encoding="utf-8"))
-        self.assertEqual(set(config), {"version", "test", "prod"})
+        self.assertEqual(set(config), {"version", "test", "production"})
         self.assertNotIn("default", config)
         self.assertNotIn("dev", config)
         for environment, expected_name in (
             ("test", "EnvironmentName=test"),
-            ("prod", "EnvironmentName=prod"),
+            ("production", "EnvironmentName=production"),
         ):
             parameters = config[environment]["deploy"]["parameters"]
             self.assertIn(expected_name, parameters["parameter_overrides"])
@@ -202,6 +208,25 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("pip-audit==2.10.1", ci_text)
         self.assertIn("python -m pip_audit -r requirements.txt", ci_text)
         self.assertIn("PYTHONDONTWRITEBYTECODE: 1", ci_text)
+        self.assertIn(
+            "gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7",
+            ci_text,
+        )
+        self.assertIn("fetch-depth: 0", ci_text)
+        self.assertRegex(
+            ci_text,
+            r"(?m)^permissions:\n  contents: read\n  pull-requests: read$",
+        )
+        self.assertIn("cancel-in-progress: true", ci_text)
+        self.assertEqual(ci_text.count("timeout-minutes:"), 2)
+        self.assertLess(
+            ci_text.index("Verify exact clean commit"),
+            ci_text.index("Scan committed secrets"),
+        )
+        self.assertLess(
+            ci_text.index("Validate exact SAM build"),
+            ci_text.index("Scan committed secrets"),
+        )
 
         expected_artifact_paths = {
             ".aws-sam/build/template.yaml",
@@ -237,15 +262,30 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertEqual(text.count("actions/github-script@"), 2)
             self.assertEqual(text.count("promotion_target_tip_mismatch"), 2)
             self.assertEqual(text.count("promotion_pr_not_found"), 2)
-            self.assertIn("AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}", text)
-            self.assertIn('[[ "$AWS_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$ ]]', text)
-            self.assertIn('[[ "$AUTH_USER_STATE_TABLE_NAME" =~ ^[A-Za-z0-9_.-]{3,255}$ ]]', text)
-            self.assertIn("INTERNAL_SNAPSHOT_CALLER_ROLE_ARN: ${{ vars.INTERNAL_SNAPSHOT_CALLER_ROLE_ARN }}", text)
-            self.assertIn('[[ "$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/', text)
-            self.assertIn('"InternalSnapshotCallerRoleArn=$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN"', text)
+            self.assertIn("AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}", text)
+            self.assertIn(
+                "role_pattern='^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role/",
+                text,
+            )
+            self.assertIn('[[ "$AWS_ROLE_ARN" =~ $role_pattern ]]', text)
+            self.assertIn('deployment_account="${BASH_REMATCH[2]}"', text)
+            self.assertIn(
+                f"/zoolanding/{environment}/auth/user-state-table-name", text
+            )
+            self.assertIn("aws ssm get-parameter", text)
+            self.assertIn("INTERNAL_SNAPSHOT_CALLER_ROLE_ARN: ${{ secrets.INTERNAL_SNAPSHOT_CALLER_ROLE_ARN }}", text)
+            self.assertIn('if [[ -n "$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN" ]]; then', text)
+            self.assertIn(
+                'parameter_overrides+=("InternalSnapshotCallerRoleArn=$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN")',
+                text,
+            )
+            self.assertIn("ALARM_TOPIC_ARN: ${{ secrets.ALARM_TOPIC_ARN }}", text)
+            self.assertNotIn("${{ vars.", text)
+            self.assertIn('"AlarmTopicArn=$ALARM_TOPIC_ARN"', text)
             second_provenance = text.rfind("actions/github-script@")
             credentials = text.index("aws-actions/configure-aws-credentials@")
             self.assertLess(second_provenance, credentials)
+            self.assertIn("mask-aws-account-id: true", text)
             upload = next(
                 step
                 for step in workflow["jobs"]["validate"]["steps"]

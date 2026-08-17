@@ -73,7 +73,9 @@ class DynamoAuthStore:
 
     def get_session(self, session_hash: str) -> dict[str, Any] | None:
         try:
-            item = self._session_table.get_item(Key={"sessionIdHash": session_hash}).get("Item")
+            item = self._session_table.get_item(
+                Key={"sessionIdHash": session_hash}, ConsistentRead=True
+            ).get("Item")
         except Exception:
             raise AuthenticationError("Authentication is unavailable") from None
         return item if isinstance(item, dict) else None
@@ -81,7 +83,8 @@ class DynamoAuthStore:
     def get_user(self, tenant_profile_key: str, user_key: str) -> dict[str, Any] | None:
         try:
             item = self._user_table.get_item(
-                Key={"tenantProfileKey": tenant_profile_key, "userKey": user_key}
+                Key={"tenantProfileKey": tenant_profile_key, "userKey": user_key},
+                ConsistentRead=True,
             ).get("Item")
         except Exception:
             raise AuthenticationError("Authentication is unavailable") from None

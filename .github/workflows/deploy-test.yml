@@ -114,10 +114,8 @@ jobs:
           python -m unittest discover -s tests -p "test_*.py"
           sam validate --lint
           sam build --no-cached
-          PYTHONPATH=.aws-sam/build/ProtectedReadFunction python -c "from handlers.protected_read import lambda_handler; assert callable(lambda_handler)"
-          PYTHONPATH=.aws-sam/build/ProtectedActionFunction python -c "from handlers.protected_action import lambda_handler; assert callable(lambda_handler)"
-          PYTHONPATH=.aws-sam/build/PublicReadFunction python -c "from handlers.public_read import lambda_handler; assert callable(lambda_handler)"
-          PYTHONPATH=.aws-sam/build/InternalSnapshotReadFunction python -c "from handlers.internal_snapshot_read import lambda_handler; assert callable(lambda_handler)"
+          test -z "$(find .aws-sam/build -type l -print -quit)"
+          python tools/verify_sam_build.py
           : > "$RUNNER_TEMP/expected-build-paths.txt"
           for function in ProtectedReadFunction ProtectedActionFunction PublicReadFunction InternalSnapshotReadFunction; do
             git ls-files 'src/**' | while IFS= read -r path; do
@@ -134,6 +132,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -z "$(find .aws-sam/build -type l -print -quit)"
           (cd .aws-sam/build && LC_ALL=C find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > .aws-sam/build-manifest.sha256
           artifact_name="data-spaces-test-build-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}"
           manifest_digest="$(sha256sum .aws-sam/build-manifest.sha256 | cut -d ' ' -f1)"
@@ -166,13 +165,14 @@ jobs:
       id-token: write
       pull-requests: read
     env:
-      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
-      AWS_CLOUDFORMATION_ROLE_ARN: ${{ vars.AWS_CLOUDFORMATION_ROLE_ARN }}
-      CONFIG_REGISTRY_TABLE_NAME: ${{ vars.CONFIG_REGISTRY_TABLE_NAME }}
-      CONFIG_PAYLOADS_BUCKET_NAME: ${{ vars.CONFIG_PAYLOADS_BUCKET_NAME }}
-      AUTH_SESSION_TABLE_NAME: ${{ vars.AUTH_SESSION_TABLE_NAME }}
-      AUTH_USER_STATE_TABLE_NAME: ${{ vars.AUTH_USER_STATE_TABLE_NAME }}
-      INTERNAL_SNAPSHOT_CALLER_ROLE_ARN: ${{ vars.INTERNAL_SNAPSHOT_CALLER_ROLE_ARN }}
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_CLOUDFORMATION_ROLE_ARN: ${{ secrets.AWS_CLOUDFORMATION_ROLE_ARN }}
+      CONFIG_REGISTRY_TABLE_PARAMETER: /zoolanding/test/config/registry-table-name
+      CONFIG_PAYLOADS_BUCKET_PARAMETER: /zoolanding/test/config/payload-bucket-name
+      AUTH_SESSION_TABLE_PARAMETER: /zoolanding/test/auth/session-table-name
+      AUTH_USER_STATE_TABLE_PARAMETER: /zoolanding/test/auth/user-state-table-name
+      INTERNAL_SNAPSHOT_CALLER_ROLE_ARN: ${{ secrets.INTERNAL_SNAPSHOT_CALLER_ROLE_ARN }}
+      ALARM_TOPIC_ARN: ${{ secrets.ALARM_TOPIC_ARN }}
     steps:
       - name: Validate artifact metadata
         id: artifact
@@ -204,6 +204,7 @@ jobs:
           EXPECTED_MANIFEST_DIGEST: ${{ steps.artifact.outputs.digest }}
         run: |
           set -euo pipefail
+          test -z "$(find .aws-sam/build -type l -print -quit)"
           test -f .aws-sam/build/template.yaml
           test -f .aws-sam/build-manifest.sha256
           test "$(sha256sum .aws-sam/build-manifest.sha256 | cut -d ' ' -f1)" = "$EXPECTED_MANIFEST_DIGEST"
@@ -270,23 +271,79 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$AWS_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
-          [[ "$AWS_CLOUDFORMATION_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
-          [[ "$CONFIG_REGISTRY_TABLE_NAME" =~ ^[A-Za-z0-9_.-]{3,255}$ ]]
-          [[ "$CONFIG_PAYLOADS_BUCKET_NAME" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
-          [[ "$AUTH_SESSION_TABLE_NAME" =~ ^[A-Za-z0-9_.-]{3,255}$ ]]
-          [[ "$AUTH_USER_STATE_TABLE_NAME" =~ ^[A-Za-z0-9_.-]{3,255}$ ]]
-          [[ "$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
+          role_pattern='^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role/[A-Za-z0-9+=,.@_/-]+$'
+          topic_pattern='^arn:(aws|aws-us-gov|aws-cn):sns:([a-z0-9-]+):([0-9]{12}):[A-Za-z0-9_.-]+$'
+          [[ "$AWS_ROLE_ARN" =~ $role_pattern ]]
+          deployment_partition="${BASH_REMATCH[1]}"
+          deployment_account="${BASH_REMATCH[2]}"
+          [[ "$AWS_CLOUDFORMATION_ROLE_ARN" =~ $role_pattern ]]
+          cloudformation_partition="${BASH_REMATCH[1]}"
+          cloudformation_account="${BASH_REMATCH[2]}"
+          [[ "$cloudformation_partition" = "$deployment_partition" ]]
+          [[ "$cloudformation_account" = "$deployment_account" ]]
+          test "$CONFIG_REGISTRY_TABLE_PARAMETER" = "/zoolanding/test/config/registry-table-name"
+          test "$CONFIG_PAYLOADS_BUCKET_PARAMETER" = "/zoolanding/test/config/payload-bucket-name"
+          test "$AUTH_SESSION_TABLE_PARAMETER" = "/zoolanding/test/auth/session-table-name"
+          test "$AUTH_USER_STATE_TABLE_PARAMETER" = "/zoolanding/test/auth/user-state-table-name"
+          if [[ -n "$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN" ]]; then
+            [[ "$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN" =~ $role_pattern ]]
+            caller_partition="${BASH_REMATCH[1]}"
+            caller_account="${BASH_REMATCH[2]}"
+            [[ "$caller_partition" = "$deployment_partition" ]]
+            [[ "$caller_account" = "$deployment_account" ]]
+          fi
+          [[ "$ALARM_TOPIC_ARN" =~ $topic_pattern ]]
+          alarm_partition="${BASH_REMATCH[1]}"
+          alarm_region="${BASH_REMATCH[2]}"
+          alarm_account="${BASH_REMATCH[3]}"
+          [[ "$alarm_partition" = "$deployment_partition" ]]
+          [[ "$alarm_account" = "$deployment_account" ]]
+          [[ "$alarm_region" = "$AWS_REGION" ]]
 
       - uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: us-east-1
+          mask-aws-account-id: true
+
+      - name: Validate exact cross-service SSM values
+        shell: bash
+        run: |
+          set -euo pipefail
+          read_parameter() {
+            local name="$1"
+            local result type value extra
+            result="$(aws ssm get-parameter --name "$name" --no-with-decryption --query 'Parameter.[Type,Value]' --output text)"
+            IFS=$'\t' read -r type value extra <<< "$result"
+            test "$type" = "String"
+            test -n "$value"
+            test -z "$extra"
+            printf '%s' "$value"
+          }
+          config_registry_table="$(read_parameter "$CONFIG_REGISTRY_TABLE_PARAMETER")"
+          config_payloads_bucket="$(read_parameter "$CONFIG_PAYLOADS_BUCKET_PARAMETER")"
+          auth_session_table="$(read_parameter "$AUTH_SESSION_TABLE_PARAMETER")"
+          auth_user_state_table="$(read_parameter "$AUTH_USER_STATE_TABLE_PARAMETER")"
+          [[ "$config_registry_table" =~ ^[A-Za-z0-9_.-]{3,255}$ ]]
+          [[ "$config_payloads_bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+          [[ "$auth_session_table" =~ ^[A-Za-z0-9_.-]{3,255}$ ]]
+          [[ "$auth_user_state_table" =~ ^[A-Za-z0-9_.-]{3,255}$ ]]
 
       - name: Deploy test
         shell: bash
         run: |
           set -euo pipefail
+          parameter_overrides=(
+            "EnvironmentName=test"
+            "ConfigRegistryTableName=/zoolanding/test/config/registry-table-name"
+            "ConfigPayloadsBucketName=/zoolanding/test/config/payload-bucket-name"
+            "AuthSessionTableName=/zoolanding/test/auth/session-table-name"
+            "AuthUserStateTableName=/zoolanding/test/auth/user-state-table-name"
+            "AlarmTopicArn=$ALARM_TOPIC_ARN"
+          )
+          if [[ -n "$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN" ]]; then
+            parameter_overrides+=("InternalSnapshotCallerRoleArn=$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN")
+          fi
           sam deploy \
             --template-file .aws-sam/build/template.yaml \
             --stack-name zoolanding-data-spaces-test \
@@ -297,10 +354,4 @@ jobs:
             --role-arn "$AWS_CLOUDFORMATION_ROLE_ARN" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              "EnvironmentName=test" \
-              "ConfigRegistryTableName=$CONFIG_REGISTRY_TABLE_NAME" \
-              "ConfigPayloadsBucketName=$CONFIG_PAYLOADS_BUCKET_NAME" \
-              "AuthSessionTableName=$AUTH_SESSION_TABLE_NAME" \
-              "AuthUserStateTableName=$AUTH_USER_STATE_TABLE_NAME" \
-              "InternalSnapshotCallerRoleArn=$INTERNAL_SNAPSHOT_CALLER_ROLE_ARN"
+            --parameter-overrides "${parameter_overrides[@]}"

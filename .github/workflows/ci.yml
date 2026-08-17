@@ -2,16 +2,20 @@ name: CI
 
 on:
   push:
-    branches: [dev, test, main, 'codex/**']
   pull_request:
-    branches: [dev, test, main]
 
 permissions:
   contents: read
+  pull-requests: read
+
+concurrency:
+  group: data-spaces-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Enforce protected promotion graph
         shell: bash
@@ -41,6 +45,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: guard
     env:
       AWS_DEFAULT_REGION: us-east-1
@@ -51,6 +56,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Verify exact clean commit
@@ -86,10 +92,8 @@ jobs:
           set -euo pipefail
           sam validate --lint
           sam build --no-cached
-          PYTHONPATH=.aws-sam/build/ProtectedReadFunction python -c "from handlers.protected_read import lambda_handler; assert callable(lambda_handler)"
-          PYTHONPATH=.aws-sam/build/ProtectedActionFunction python -c "from handlers.protected_action import lambda_handler; assert callable(lambda_handler)"
-          PYTHONPATH=.aws-sam/build/PublicReadFunction python -c "from handlers.public_read import lambda_handler; assert callable(lambda_handler)"
-          PYTHONPATH=.aws-sam/build/InternalSnapshotReadFunction python -c "from handlers.internal_snapshot_read import lambda_handler; assert callable(lambda_handler)"
+          test -z "$(find .aws-sam/build -type l -print -quit)"
+          python tools/verify_sam_build.py
           : > "$RUNNER_TEMP/expected-build-paths.txt"
           for function in ProtectedReadFunction ProtectedActionFunction PublicReadFunction InternalSnapshotReadFunction; do
             git ls-files 'src/**' | while IFS= read -r path; do
@@ -100,3 +104,8 @@ jobs:
           LC_ALL=C sort -u -o "$RUNNER_TEMP/expected-build-paths.txt" "$RUNNER_TEMP/expected-build-paths.txt"
           (cd .aws-sam/build && LC_ALL=C find . -type f -print | LC_ALL=C sort) > "$RUNNER_TEMP/actual-build-paths.txt"
           diff -u "$RUNNER_TEMP/expected-build-paths.txt" "$RUNNER_TEMP/actual-build-paths.txt"
+
+      - name: Scan committed secrets
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

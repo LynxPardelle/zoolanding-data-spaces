@@ -25,6 +25,6 @@ def _project_fields(fields: list[Mapping[str, Any]], values: Mapping[str, Any]) 
 def _project_value(field: Mapping[str, Any], value: Any) -> Any:
     if field["type"] == "object":
         return _project_fields(field["fields"], value)
-    if field["type"] == "array" and field["items"]["type"] == "object":
-        return [_project_fields(field["items"]["fields"], item) for item in value]
+    if field["type"] == "array":
+        return [_project_value(field["items"], item) for item in value]
     return copy.deepcopy(value)

@@ -20,7 +20,7 @@ ASSUMED_ROLE_ARN_RE = re.compile(
 def require_internal_snapshot_caller(event: Any) -> None:
     expected = _role_identity(os.environ.get("INTERNAL_SNAPSHOT_CALLER_ROLE_ARN", ""), expected=True)
     if expected is None:
-        raise RuntimeError("internal caller role is not configured")
+        raise AuthorizationError()
 
     identities = {
         identity
