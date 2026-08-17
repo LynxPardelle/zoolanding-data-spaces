@@ -1,19 +1,27 @@
-# Mantenimiento pendiente — 2026-08-12
+# Mantenimiento del repositorio — actualizado 2026-08-17
 
-## Repositorio sin origen
+## Publicación y automatización
 
-Este repositorio no tiene ningún remoto Git configurado. El README lo identifica como implementación local y prohíbe desplegar o mutar AWS durante esta fase; por ello no se creó un repositorio ni se inventó un destino de publicación.
+- Origen canónico privado: `https://github.com/LynxPardelle/zoolanding-data-spaces`.
+- Ramas base publicadas: `main`, `test` y `dev`; promoción prevista `dev -> test -> main`.
+- GitHub Actions tiene permisos de lectura por defecto. CI valida cada push y pull
+  request; los despliegues sólo escuchan las ramas `test` o `main`.
+- Los Environments `test` y `production` aceptan despliegues sólo desde `test`
+  y `main`, respectivamente.
+- Las variables de los roles OIDC/CloudFormation y del topic de alarmas están
+  configuradas sin guardar credenciales AWS estáticas.
+- Validación local: 109/109 pruebas, compilación, SAM, Actionlint y Gitleaks.
 
-La rama local `codex/phase8-infrastructure-readiness` contiene el endurecimiento de política de esquemas y sus pruebas. El commit queda disponible sólo en esta copia hasta que se apruebe un origen.
+## Despliegue pendiente
 
-## Decisión requerida
+**NO-GO para desplegar la aplicación.** Sólo se desplegaron las identidades
+retenidas y acotadas; no existe el stack de Data Spaces ni sus parámetros SSM
+canónicos. El topic de alarmas existe, pero no tiene suscriptores confirmados.
+No se sustituyó ninguna dependencia faltante por un ARN inventado o comodín.
 
-Antes de publicar, el propietario debe indicar:
+La protección de ramas privadas fue rechazada por el plan GitHub actual, que
+exige GitHub Pro o visibilidad pública. Se mantuvo la visibilidad privada. Hasta
+resolverlo, use pull requests, verifique CI y nunca fuerce historia.
 
-1. la organización y el repositorio GitHub existentes que serán la fuente canónica;
-2. si la visibilidad será privada o pública;
-3. la rama base y el flujo de promoción compatibles con `dev -> test -> main`.
-
-Recomendación: mantenerlo privado hasta que se aprueben el contrato entre repositorios, los responsables de mantenimiento y las puertas de despliegue. Después se debe añadir el remoto explícitamente, comparar historiales y publicar sólo si el push es fast-forward o mediante una integración revisada.
-
-No se incluyeron secretos, identificadores operativos ni artefactos de build en el commit.
+No transfiera `.env`, credenciales, datos no revisados, `.aws-sam`, cachés,
+entornos virtuales ni outputs. El código publicado se recupera clonando GitHub.
